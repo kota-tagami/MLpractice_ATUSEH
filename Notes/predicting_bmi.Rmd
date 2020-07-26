@@ -1,0 +1,178 @@
+---
+title: "predicting BMI"
+output: html_notebook
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(
+  warning = F,
+  error = F,
+  echo = F,
+  message = F
+)
+
+knitr::opts_knit$set(
+  root.dir = normalizePath("..")
+)
+```
+
+```{r library}
+library(tidyverse)
+library(magrittr)
+library(ggthemes)
+library(randomForest)
+```
+
+
+```{r data_import}
+resp <- 
+  "ehresp_2014.csv" %>% 
+  str_c("Data", "Source", ., sep = "/") %>% 
+  read_csv()
+
+act <- 
+  "ehact_2014.csv" %>% 
+  str_c("Data", "Source", ., sep = "/") %>% 
+  read_csv()
+```
+
+```{r data_handling}
+resp1 <- 
+  resp %>% 
+  mutate(
+    bmi = if_else(erbmi < 0, NA_real_, erbmi),
+    obesity = if_else(bmi >= 30, 1, 0),
+    inc = eeincome1 %>% 
+      as.character() %>% 
+      fct_collapse(
+        "High" = "1",
+        "Low" = "2",
+        "Middle" = "3",
+        "[Blank]" = "-1",
+        "[DK]" = "-2",
+        "[Refused]" = "-3"
+      ),
+    soda = eudietsoda %>% 
+      as.character() %>% 
+      fct_collapse(
+        "Diet" = "1",
+        "Regular" = "2",
+        "Both" = "3",
+        "[Blank]" = "-1",
+        "[DK]" = "-2",
+        "[Refused]" = "-3"
+      ),
+    fastfood = eufastfd %>% 
+      as.character() %>% 
+      fct_collapse(
+        "Purchased within 7 days" = "1",
+        "Didn't purchase" = "2",
+        "[Blank]" = "-1",
+        "[DK]" = "-2",
+        "[Refused]" = "-3"
+      ),
+  )
+
+act1 <- 
+  act %>% 
+  filter(eueatsum == 1) %>% 
+  group_by(tucaseid) %>% 
+  count(name = "eatsum")
+
+resp1 %<>% left_join(., act1) %>% filter(! bmi %>% is.na(.))
+```
+
+```{r plot_func_cat}
+plot_cat <- function(.data, .cat_var, .var_title)
+{
+  ggplot(data = .data) %+%
+    theme_minimal() %+%
+    geom_density(
+      aes(x = bmi, 
+          fill = !! enquo(.cat_var), 
+          color = !! enquo(.cat_var)),
+      alpha = 0.1
+    ) %+%
+    scale_fill_tableau() %+%
+    scale_color_tableau() %+%
+    labs(
+      x = "BMI", 
+      color = .var_title, fill = .var_title
+    )
+}
+```
+
+```{r}
+plot_cont <- function(.data, .cont_var, .var_title)
+{
+  ggplot(data = .data, aes(x = !!enquo(.cont_var), y = bmi)) %+%
+    theme_minimal() %+%
+    geom_point() %+%
+    geom_smooth() %+%
+    scale_color_tableau() %+%
+    labs(
+      x = .var_title,
+      y = "BMI"
+    )
+}
+```
+
+
+```{r}
+resp1 %>% 
+  plot_cat(., inc, "Income")
+```
+
+```{r}
+plot_cat(resp1, soda, "Drinking soda types")
+```
+
+
+```{r}
+plot_cat(resp1, fastfood, "Purchased fast-food")
+```
+
+
+```{r}
+resp1 %>% 
+  plot_cont(., ertpreat, "Total amount of time spent in primary eating and drinking (in minutes)")
+```
+
+```{r}
+resp1 %>% 
+  plot_cont(., ertseat, "Total amount of time spent in secondary eating (in minutes)")
+```
+
+```{r}
+resp1 %>% 
+  plot_cont(., eatsum, "The number of activities with eating")
+```
+
+
+```{r}
+data <- 
+  resp1 %>% 
+  select(bmi, obesity, inc, soda, fastfood, ertpreat, ertseat, eatsum) %>% 
+  filter_all(all_vars(!is.na(.))) %>% 
+  filter_if(is.factor, all_vars(!str_detect(., "\\[")))
+
+res_lm <- 
+  data %>% 
+  lm(data = ., 
+     bmi ~ inc + soda + fastfood + ertpreat + ertseat + eatsum) 
+
+res_lm %>% 
+  broom::augment() %>% 
+  ggplot(aes(sample = .resid)) %+%
+  geom_qq() %+%
+  geom_qq_line()
+
+```
+
+```{r}
+res_rf <- randomForest(data = data, factor(obesity) ~ inc + soda + fastfood + ertpreat + ertseat + eatsum)
+
+res_rf
+```
+
+
